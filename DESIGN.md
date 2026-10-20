@@ -45,15 +45,22 @@ reconciler (every 10 min): republishes lost messages, alerts on stuck/dead rows
    offset only after that, so redelivery is harmless and a crash loses nothing. A message
    that fails validation goes to `dead_letters` and raises an alert; it is never dropped.
 4. **Worker** claims rows in one statement:
-   `UPDATE … SET status='sending', locked_by, locked_until=now()+lease, attempts+1
-   WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`. It sends with
+   `UPDATE … SET status='sending', locked_by, locked_until=now()+lease, claims+1
+   WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`. It sends the batch concurrently.
+   Right before each provider call it re-checks the lease and counts the attempt
+   (`attempts+1 WHERE locked_by = me AND enough lease left`). It sends with
    `idempotencyKey = receipt-<provider>-<ref>`, then marks the row `sent`
    `WHERE locked_by = me`.
+
+   `claims` and `attempts` are separate on purpose. Crashes unrelated to a row only
+   raise its `claims`, so they can't use up its send attempts. Only a row picked up
+   more than 3× `max_attempts` times (it keeps killing its workers) is parked.
 
    | Outcome | Next state |
    |---|---|
    | Transient error | `pending` with exponential backoff |
    | Permanent error, out of attempts, or invalid stored data | `dead` + alert |
+   | First attempt older than the provider's idempotency window | `dead` + alert (a human checks the provider) |
    | Worker dies | lease expires, any worker reclaims the row |
 
 ```
@@ -76,13 +83,20 @@ with an idempotent write keyed on the payment:
 **What it can't guarantee.** No database can make an external API call exactly-once. If
 the provider accepts the email and the worker dies before `UPDATE … sent`, the lease
 expires and the row is sent again. The fix lives on the provider side: the stable
-idempotency key makes that second call a no-op. Real providers (Resend, Postmark) honour
-such a key for roughly 24h, which is far longer than lease + backoff. The test
+idempotency key makes that second call a no-op. The test
 `worker dies after the provider accepted…` shows exactly this case: **2 calls, 1 email**.
 
+**The honest bound.** Providers only dedupe for a limited time (Resend and Postmark: about
+24h, set by `PROVIDER_IDEMPOTENCY_HOURS`). So the guarantee is exactly-once *within that
+window*. Normal lease and backoff fit well inside it. After a longer outage, a resend
+could duplicate an email that already landed, and we can't tell whether it did. So once
+the first attempt is older than the window, the worker stops resending and parks the row
+as `dead` with an alert. Never sending twice wins over sending automatically; a human
+checks the provider's log and requeues the row if needed.
+
 **Lease rules.**
-- A send times out at half the lease, so a slow worker gives up before anyone else can
-  claim the row.
+- A send only starts if at least half the lease is left, and it times out at half the
+  lease, so it always finishes before anyone else can claim the row.
 - Every state change is conditional on `locked_by = me`, so a worker that lost its lease
   can't overwrite the new owner's state.
 
