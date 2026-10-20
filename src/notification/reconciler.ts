@@ -9,6 +9,7 @@ import { shutdownSignal, sleep } from '../runtime.js';
  *     retention, or a consumer bug) -> unpublish so the relay sends them again
  *   - outbox rows never published (relay down)                   -> alert
  *   - deliveries that are dead                                   -> alert
+ * Messages the consumer dead-lettered are left alone: republishing would loop forever.
  * Republishing is safe because every hop downstream is idempotent.
  */
 export async function reconcileOnce(pool: pg.Pool, olderThan = '10 minutes') {
@@ -19,6 +20,8 @@ export async function reconcileOnce(pool: pg.Pool, olderThan = '10 minutes') {
        AND NOT EXISTS (
          SELECT 1 FROM email_deliveries d
          WHERE o.dedupe_key = 'receipt:' || d.provider || ':' || d.payment_reference)
+       -- Rejected by the consumer: republishing can't help, it's already alerting.
+       AND NOT EXISTS (SELECT 1 FROM dead_letters dl WHERE dl.message_key = o.message_key)
      RETURNING o.id`,
     [olderThan],
   );

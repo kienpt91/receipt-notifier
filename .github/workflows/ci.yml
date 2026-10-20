@@ -27,10 +27,11 @@ jobs:
         run: docker compose up -d
       # Kafka is probed from the host, the way the tests connect. An in-container probe
       # follows the advertised listener (localhost:59092), which only exists on the host.
-      - name: Wait for Postgres and Kafka
+      - name: Wait for Postgres, Redis and Kafka
         timeout-minutes: 3
         run: |
           until timeout 10 docker compose exec -T postgres pg_isready -U postgres; do sleep 2; done
+          until timeout 5 docker compose exec -T redis redis-cli ping | grep -q PONG; do sleep 1; done
           until timeout 20 node -e "
             const { Kafka, logLevel } = require('kafkajs');
             const admin = new Kafka({ brokers: ['localhost:59092'], logLevel: logLevel.NOTHING, retry: { retries: 0 } }).admin();
