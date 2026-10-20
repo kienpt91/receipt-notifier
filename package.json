@@ -6,6 +6,8 @@
   "scripts": {
     "migrate": "tsx src/scripts/migrate.ts",
     "api": "tsx src/api/server.ts",
+    "worker": "tsx src/notification/worker.ts",
+    "requeue": "tsx src/notification/requeue.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
