@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeEmailProvider } from '../src/email/provider.js';
+import { requeueDelivery } from '../src/notification/requeue.js';
 import { DeliveryWorker } from '../src/notification/worker.js';
 import { fakeMail, insertDelivery, pool, redis, resetState } from './helpers.js';
 
@@ -103,6 +104,19 @@ describe('DeliveryWorker', () => {
     await new DeliveryWorker(pool, new FakeEmailProvider(redis), { providerIdempotencyHours: 24 }).runOnce();
     expect(await statusOf('pay_old')).toMatchObject({ status: 'dead' });
     expect(await fakeMail('receipt-whop-pay_old')).toEqual({ calls: 0, delivered: 0 });
+  });
+
+  it('an operator requeue after checking the provider actually sends it', async () => {
+    await insertDelivery('pay_old');
+    await pool.query("UPDATE email_deliveries SET attempts = 1, first_attempt_at = now() - interval '25 hours'");
+    const w = new DeliveryWorker(pool, new FakeEmailProvider(redis), { providerIdempotencyHours: 24 });
+    await w.runOnce();
+    expect(await statusOf('pay_old')).toMatchObject({ status: 'dead' });
+
+    expect(await requeueDelivery(pool, 'whop', 'pay_old')).toBe(true);
+    await w.runOnce();
+    expect(await statusOf('pay_old')).toMatchObject({ status: 'sent', attempts: 1 });
+    expect(await requeueDelivery(pool, 'whop', 'pay_old')).toBe(false); // only dead rows
   });
 
   it('re-validates the stored row and never sends an invalid one', async () => {
