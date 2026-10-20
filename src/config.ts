@@ -22,4 +22,6 @@ export const config = {
   },
   port: Number(process.env.PORT ?? 3100),
   leaseSeconds: Number(process.env.LEASE_SECONDS ?? 60),
+  // How long the email provider dedupes on an idempotency key (Resend/Postmark: ~24h).
+  providerIdempotencyHours: Number(process.env.PROVIDER_IDEMPOTENCY_HOURS ?? 24),
 };
