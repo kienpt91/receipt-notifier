@@ -6,7 +6,10 @@
   "scripts": {
     "migrate": "tsx src/scripts/migrate.ts",
     "api": "tsx src/api/server.ts",
+    "relay": "tsx src/relay/relay.ts",
+    "consumer": "tsx src/notification/consumer.ts",
     "worker": "tsx src/notification/worker.ts",
+    "reconciler": "tsx src/notification/reconciler.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
