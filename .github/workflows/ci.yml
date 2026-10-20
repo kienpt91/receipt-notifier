@@ -25,12 +25,13 @@ jobs:
       # Same Postgres/Redis/Kafka as local dev: tests run against the real things.
       - name: Start infrastructure
         run: docker compose up -d
+      # Each probe is time-boxed: kafka-topics.sh retries forever while the broker boots.
       - name: Wait for Postgres and Kafka
+        timeout-minutes: 3
         run: |
-          for i in $(seq 1 60); do docker compose exec -T postgres pg_isready -U postgres && break; sleep 2; done
-          for i in $(seq 1 60); do
-            docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
-            sleep 2
+          until timeout 10 docker compose exec -T postgres pg_isready -U postgres; do sleep 2; done
+          until timeout 15 docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
+            echo "waiting for kafka"; sleep 2
           done
       - run: npm test
       - name: Infrastructure logs on failure
