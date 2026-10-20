@@ -73,7 +73,12 @@ export class DeliveryWorker {
 
   async runOnce(): Promise<number> {
     const rows = await this.claim();
-    for (const row of rows) await this.process(row);
+    // Concurrently: every row's lease started at claim time, so sending them one after
+    // another would let the later rows' leases expire before they are even attempted.
+    const results = await Promise.allSettled(rows.map((row) => this.process(row)));
+    for (const r of results) {
+      if (r.status === 'rejected') console.error('delivery update failed; row is reclaimed after its lease', r.reason);
+    }
     return rows.length;
   }
 
