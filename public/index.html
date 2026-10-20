@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual Receipt</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; }
+    label { display: block; margin-top: 14px; font-weight: 600; }
+    input, select { width: 100%; padding: 8px; box-sizing: border-box; font: inherit; }
+    .row { display: flex; gap: 8px; } .row > input { flex: 1; } .row > select { width: auto; }
+    .err { color: #b42318; font-size: 13px; min-height: 1em; }
+    button { margin-top: 20px; padding: 10px 16px; font: inherit; }
+  </style>
+</head>
+<body>
+  <h1>Record manual payment</h1>
+  <form id="receipt-form" novalidate>
+    <label>Customer email <input name="recipientEmail" type="email" autocomplete="off" /></label>
+    <div class="err" data-error-for="recipientEmail"></div>
+
+    <label>Amount</label>
+    <div class="row"><input name="amount" inputmode="decimal" placeholder="12.34" /><select name="currency"></select></div>
+    <div class="err" data-error-for="amountMinor"></div>
+    <div class="err" data-error-for="currency"></div>
+
+    <label>Payment reference <input name="paymentReference" placeholder="bank-transfer-0042" /></label>
+    <div class="err" data-error-for="paymentReference"></div>
+
+    <label>Admin token <input name="adminToken" type="password" /></label>
+    <div class="err" data-error-for="_form"></div>
+
+    <button type="submit">Record &amp; send receipt</button>
+  </form>
+  <p id="status"></p>
+  <script type="module" src="/form.js"></script>
+</body>
+</html>
