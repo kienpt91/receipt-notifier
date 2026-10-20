@@ -1,0 +1,45 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+      # Same Postgres/Redis/Kafka as local dev: tests run against the real things.
+      - name: Start infrastructure
+        run: docker compose up -d
+      # Kafka is probed from the host, the way the tests connect. An in-container probe
+      # follows the advertised listener (localhost:59092), which only exists on the host.
+      - name: Wait for Postgres, Redis and Kafka
+        timeout-minutes: 3
+        run: |
+          until timeout 10 docker compose exec -T postgres pg_isready -U postgres; do sleep 2; done
+          until timeout 5 docker compose exec -T redis redis-cli ping | grep -q PONG; do sleep 1; done
+          until timeout 20 node -e "
+            const { Kafka, logLevel } = require('kafkajs');
+            const admin = new Kafka({ brokers: ['localhost:59092'], logLevel: logLevel.NOTHING, retry: { retries: 0 } }).admin();
+            admin.connect().then(() => admin.listTopics()).then(() => process.exit(0), () => process.exit(1));
+          "; do
+            echo "waiting for kafka"; sleep 2
+          done
+      - run: npm test
+      - name: Infrastructure logs on failure
+        if: failure()
+        run: docker compose logs --tail 100
