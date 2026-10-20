@@ -9,6 +9,7 @@
     "relay": "tsx src/relay/relay.ts",
     "consumer": "tsx src/notification/consumer.ts",
     "worker": "tsx src/notification/worker.ts",
+    "requeue": "tsx src/notification/requeue.ts",
     "reconciler": "tsx src/notification/reconciler.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
