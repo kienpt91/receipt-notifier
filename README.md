@@ -25,6 +25,9 @@ npm run worker
 npm run reconciler
 ```
 
+A receipt parked as `dead` (alerted) is requeued, once someone has checked the provider,
+with `npm run requeue -- <provider> <payment_reference>`.
+
 ## Configuration
 
 | Env | Default |

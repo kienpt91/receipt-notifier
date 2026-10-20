@@ -92,7 +92,9 @@ window*. Normal lease and backoff fit well inside it. After a longer outage, a r
 could duplicate an email that already landed, and we can't tell whether it did. So once
 the first attempt is older than the window, the worker stops resending and parks the row
 as `dead` with an alert. Never sending twice wins over sending automatically; a human
-checks the provider's log and requeues the row if needed.
+checks the provider's log and, if the email never arrived, runs
+`npm run requeue -- <provider> <payment_reference>`. That resets the counters and the
+window, not just the status; otherwise the row would be parked again at once.
 
 **Lease rules.**
 - A send only starts if at least half the lease is left, and it times out at half the
