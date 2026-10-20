@@ -86,4 +86,13 @@ describe('webhook -> outbox -> Kafka -> email_deliveries -> email', () => {
     expect(await relayBatch(pool, producer)).toBe(1);
     await until(async () => (await deliveries()) === 1);
   });
+
+  it('reconciler does not republish a message the consumer dead-lettered', async () => {
+    const body = whopPaymentSucceeded({ paymentId: 'pay_poison' });
+    await app.inject({ method: 'POST', url: '/webhooks/whop', headers: signWhop(body, 'msg_poison'), payload: body });
+    await pool.query("UPDATE outbox SET published_at = now() - interval '1 hour'");
+    await pool.query("INSERT INTO dead_letters (topic, message_key, value, error) VALUES ('t', 'whop:pay_poison', '{}', 'bad')");
+
+    expect(await reconcileOnce(pool, '10 minutes')).toMatchObject({ republished: 0 });
+  });
 });
