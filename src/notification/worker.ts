@@ -16,6 +16,7 @@ interface DeliveryRow {
   recipient: string;
   amount_minor: string; // BIGINT arrives as a string
   currency: string;
+  claims: number;
   attempts: number;
   max_attempts: number;
 }
@@ -25,6 +26,7 @@ export interface WorkerOptions {
   leaseSeconds?: number;
   batchSize?: number;
   baseBackoffMs?: number;
+  providerIdempotencyHours?: number;
 }
 
 /**
@@ -34,18 +36,23 @@ export interface WorkerOptions {
  *                       |--transient--> pending (next_attempt_at = backoff)
  *                       |--permanent / out of attempts / invalid--> dead (+ alert)
  *                       '--worker dies--> lease expires --> reclaimed by any worker
+ *
+ * `claims` counts pickups (crash recovery included), `attempts` counts real sends, so
+ * crashes unrelated to this row can't use up its attempts before it is ever sent.
  */
 export class DeliveryWorker {
   readonly workerId: string;
   private leaseSeconds: number;
   private batchSize: number;
   private baseBackoffMs: number;
+  private providerIdempotencyHours: number;
 
   constructor(private pool: pg.Pool, private provider: EmailProvider, opts: WorkerOptions = {}) {
     this.workerId = opts.workerId ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
     this.leaseSeconds = opts.leaseSeconds ?? config.leaseSeconds;
     this.batchSize = opts.batchSize ?? 10;
     this.baseBackoffMs = opts.baseBackoffMs ?? 30_000;
+    this.providerIdempotencyHours = opts.providerIdempotencyHours ?? config.providerIdempotencyHours;
   }
 
   /**
@@ -57,7 +64,7 @@ export class DeliveryWorker {
     const { rows } = await this.pool.query<DeliveryRow>(
       `UPDATE email_deliveries
        SET status = 'sending', locked_by = $1,
-           locked_until = now() + make_interval(secs => $2), attempts = attempts + 1
+           locked_until = now() + make_interval(secs => $2), claims = claims + 1
        WHERE id IN (
          SELECT id FROM email_deliveries
          WHERE (status = 'pending' AND next_attempt_at <= now())
@@ -65,7 +72,7 @@ export class DeliveryWorker {
          ORDER BY next_attempt_at
          FOR UPDATE SKIP LOCKED
          LIMIT $3)
-       RETURNING id, provider, payment_reference, recipient, amount_minor, currency, attempts, max_attempts`,
+       RETURNING id, provider, payment_reference, recipient, amount_minor, currency, claims, attempts, max_attempts`,
       [this.workerId, this.leaseSeconds, this.batchSize],
     );
     return rows;
@@ -80,6 +87,23 @@ export class DeliveryWorker {
       if (r.status === 'rejected') console.error('delivery update failed; row is reclaimed after its lease', r.reason);
     }
     return rows.length;
+  }
+
+  /**
+   * Starts a real send attempt. Re-checks the lease right before the provider call, with
+   * enough time left for the whole send, and counts the attempt. Returns null when the
+   * lease is gone: another worker owns the row now.
+   */
+  async beginAttempt(row: DeliveryRow): Promise<{ attempts: number; outsideWindow: boolean } | null> {
+    const { rows } = await this.pool.query<{ attempts: number; outside_window: boolean }>(
+      `UPDATE email_deliveries
+       SET attempts = attempts + 1, first_attempt_at = COALESCE(first_attempt_at, now())
+       WHERE id = $1 AND locked_by = $2 AND status = 'sending'
+         AND locked_until > now() + make_interval(secs => $3)
+       RETURNING attempts, first_attempt_at < now() - make_interval(hours => $4) AS outside_window`,
+      [row.id, this.workerId, this.leaseSeconds / 2, this.providerIdempotencyHours],
+    );
+    return rows[0] ? { attempts: rows[0].attempts, outsideWindow: rows[0].outside_window } : null;
   }
 
   /** Exposed so tests can simulate a crash between send and mark-sent. */
@@ -107,10 +131,19 @@ export class DeliveryWorker {
   }
 
   private async process(row: DeliveryRow) {
-    if (row.attempts > row.max_attempts) return this.markDead(row, 'lease expired too many times');
+    // Only a row that keeps killing its workers gets here; ordinary crashes don't.
+    if (row.claims > row.max_attempts * 3) return this.markDead(row, `picked up ${row.claims} times without finishing`);
     if (!ReceiptRequest.safeParse(this.asRequest(row)).success) {
       return this.markDead(row, 'stored receipt failed validation');
     }
+    const attempt = await this.beginAttempt(row);
+    if (!attempt) return; // lease lost before sending; the new owner takes it from here
+    // Past the provider's dedupe window a resend could reach the customer twice, and we
+    // can't tell whether an earlier attempt landed. A human checks the provider instead.
+    if (attempt.outsideWindow) {
+      return this.markDead(row, 'earlier attempt is outside the provider idempotency window; check the provider before resending');
+    }
+    const { attempts } = attempt;
     try {
       const { messageId } = await this.sendOnly(row);
       const res = await this.pool.query(
@@ -123,8 +156,8 @@ export class DeliveryWorker {
       if (!res.rowCount) console.warn(`lease lost on delivery ${row.id}; owner's retry is deduped by the provider`);
     } catch (err) {
       const message = (err as Error).message;
-      if (err instanceof PermanentEmailError || row.attempts >= row.max_attempts) return this.markDead(row, message);
-      const delayMs = Math.min(this.baseBackoffMs * 2 ** (row.attempts - 1), 3_600_000) * (0.8 + Math.random() * 0.4);
+      if (err instanceof PermanentEmailError || attempts >= row.max_attempts) return this.markDead(row, message);
+      const delayMs = Math.min(this.baseBackoffMs * 2 ** (attempts - 1), 3_600_000) * (0.8 + Math.random() * 0.4);
       await this.pool.query(
         `UPDATE email_deliveries
          SET status = 'pending', locked_by = NULL, locked_until = NULL, last_error = $3,
