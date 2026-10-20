@@ -101,4 +101,12 @@ describe('POST /admin/receipts', () => {
     expect((await post(body)).json()).toEqual({ status: 'duplicate' });
     expect((await post(body, 'wrong')).statusCode).toBe(401);
   });
+
+  it('rejects a reused reference with a different amount instead of silently keeping the old one', async () => {
+    const body = { recipientEmail: 'a@b.co', amountMinor: '1250', currency: 'EUR', paymentReference: 'bank-0043' };
+    await post(body);
+    const res = await post({ ...body, amountMinor: '9999' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().errors.paymentReference).toBeDefined();
+  });
 });

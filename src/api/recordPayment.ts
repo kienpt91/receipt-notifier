@@ -14,12 +14,14 @@ export interface PaymentInput {
  * together or not at all: a crash right after COMMIT can't lose the email, and a crash
  * before COMMIT leaves nothing behind for the retry to trip over.
  *
- * Idempotent: a duplicate event hits the unique keys and inserts nothing.
+ * Idempotent: a duplicate event hits the unique keys and inserts nothing. A "duplicate"
+ * whose receipt differs from the one already queued is reported as a conflict instead of
+ * being silently ignored.
  */
 export async function recordPaymentAndEnqueueReceipt(
   client: pg.PoolClient,
   { provider, receipt, status, paidAt }: PaymentInput,
-): Promise<'queued' | 'duplicate'> {
+): Promise<'queued' | 'duplicate' | 'conflict'> {
   await client.query(
     `INSERT INTO payments (provider, provider_payment_id, customer_email, amount_minor, currency, status, paid_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -28,11 +30,20 @@ export async function recordPaymentAndEnqueueReceipt(
   );
 
   const message: ReceiptMessage = { v: 1, provider, ...receipt };
+  const dedupeKey = `receipt:${provider}:${receipt.paymentReference}`;
   const outbox = await client.query(
     `INSERT INTO outbox (topic, message_key, dedupe_key, payload)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (dedupe_key) DO NOTHING`,
-    [config.receiptTopic, `${provider}:${receipt.paymentReference}`, `receipt:${provider}:${receipt.paymentReference}`, message],
+    [config.receiptTopic, `${provider}:${receipt.paymentReference}`, dedupeKey, message],
   );
-  return outbox.rowCount ? 'queued' : 'duplicate';
+  if (outbox.rowCount) return 'queued';
+
+  const { rows } = await client.query<{ payload: ReceiptMessage }>('SELECT payload FROM outbox WHERE dedupe_key = $1', [dedupeKey]);
+  const queued = rows[0]?.payload;
+  const same =
+    queued?.recipientEmail === receipt.recipientEmail &&
+    queued.amountMinor === receipt.amountMinor &&
+    queued.currency === receipt.currency;
+  return same ? 'duplicate' : 'conflict';
 }
