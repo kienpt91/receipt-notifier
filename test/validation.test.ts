@@ -50,6 +50,12 @@ describe('Whop payload mapping', () => {
     expect(r).toMatchObject({ ok: true, receipt: { amountMinor: '690', currency: 'USD', recipientEmail: 'buyer@example.com' } });
   });
 
+  it('rejects an invalid paid_at instead of letting Postgres fail on every retry', () => {
+    const event = JSON.parse(whopPaymentSucceeded());
+    event.data.paid_at = 'not-a-date';
+    expect(toReceipt(event)).toMatchObject({ ok: false });
+  });
+
   it('refuses to guess when the email is missing', () => {
     expect(toReceipt(JSON.parse(whopPaymentSucceeded({ email: null })))).toMatchObject({ ok: false });
   });
