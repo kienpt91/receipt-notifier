@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { toReceipt } from '../src/api/whop.js';
 import { formatMinor, majorToMinor } from '../src/shared/money.js';
 import { ReceiptRequest } from '../src/shared/receiptSchema.js';
+import { whopPaymentSucceeded } from './helpers.js';
 
 const valid = { recipientEmail: 'a@b.co', amountMinor: '1999', currency: 'USD', paymentReference: 'pay_123' };
 
@@ -39,5 +41,22 @@ describe('shared ReceiptRequest schema', () => {
 
   it('normalises email', () => {
     expect(ReceiptRequest.parse({ ...valid, recipientEmail: ' A@B.CO ' }).recipientEmail).toBe('a@b.co');
+  });
+});
+
+describe('Whop payload mapping', () => {
+  it('maps a decimal Whop total to minor units through the shared schema', () => {
+    const r = toReceipt(JSON.parse(whopPaymentSucceeded({ total: 6.9 })));
+    expect(r).toMatchObject({ ok: true, receipt: { amountMinor: '690', currency: 'USD', recipientEmail: 'buyer@example.com' } });
+  });
+
+  it('rejects an invalid paid_at instead of letting Postgres fail on every retry', () => {
+    const event = JSON.parse(whopPaymentSucceeded());
+    event.data.paid_at = 'not-a-date';
+    expect(toReceipt(event)).toMatchObject({ ok: false });
+  });
+
+  it('refuses to guess when the email is missing', () => {
+    expect(toReceipt(JSON.parse(whopPaymentSucceeded({ email: null })))).toMatchObject({ ok: false });
   });
 });

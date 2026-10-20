@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "migrate": "tsx src/scripts/migrate.ts",
+    "api": "tsx src/api/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
