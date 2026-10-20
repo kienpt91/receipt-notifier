@@ -27,6 +27,7 @@ describe('DeliveryWorker', () => {
     const provider = new FakeEmailProvider(redis);
     const a = new DeliveryWorker(pool, provider, { workerId: 'a', leaseSeconds: 1 });
     const [row] = await a.claim();
+    await a.beginAttempt(row!);
     await a.sendOnly(row!); // ...and the process is killed here
 
     const b = new DeliveryWorker(pool, provider, { workerId: 'b' });
@@ -74,6 +75,34 @@ describe('DeliveryWorker', () => {
     provider.failPermanently = true;
     await w.runOnce();
     expect(await statusOf('pay_bounce')).toMatchObject({ status: 'dead', attempts: 1 });
+  });
+
+  it('crashes before any send do not use up attempts', async () => {
+    await insertDelivery('pay_crashy');
+    const w = new DeliveryWorker(pool, new FakeEmailProvider(redis), { workerId: 'w' });
+    for (let i = 0; i < 8; i++) {
+      await w.claim(); // ...worker dies before sending, lease expires
+      await pool.query("UPDATE email_deliveries SET locked_until = now() - interval '1 second'");
+    }
+    await w.runOnce();
+    expect(await statusOf('pay_crashy')).toMatchObject({ status: 'sent', attempts: 1 });
+  });
+
+  it('a row that keeps killing its workers is parked as dead without sending', async () => {
+    await insertDelivery('pay_poison');
+    await pool.query("UPDATE email_deliveries SET claims = 24");
+    await new DeliveryWorker(pool, new FakeEmailProvider(redis)).runOnce();
+    expect(await statusOf('pay_poison')).toMatchObject({ status: 'dead' });
+    expect(await fakeMail('receipt-whop-pay_poison')).toEqual({ calls: 0, delivered: 0 });
+  });
+
+  it('does not auto-resend once the provider idempotency window has passed', async () => {
+    await insertDelivery('pay_old');
+    // An attempt 25h ago may or may not have reached the customer.
+    await pool.query("UPDATE email_deliveries SET attempts = 1, first_attempt_at = now() - interval '25 hours'");
+    await new DeliveryWorker(pool, new FakeEmailProvider(redis), { providerIdempotencyHours: 24 }).runOnce();
+    expect(await statusOf('pay_old')).toMatchObject({ status: 'dead' });
+    expect(await fakeMail('receipt-whop-pay_old')).toEqual({ calls: 0, delivered: 0 });
   });
 
   it('re-validates the stored row and never sends an invalid one', async () => {

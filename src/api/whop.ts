@@ -13,7 +13,8 @@ const WhopPaymentSucceeded = z.object({
     total: z.number().nullable(),
     currency: z.string(),
     status: z.string().nullable(),
-    paid_at: z.string().nullable(),
+    // Validated here: an invalid date would otherwise fail in Postgres and 500 on every retry.
+    paid_at: z.string().datetime({ offset: true }).nullable(),
     user: z.object({ email: z.string().nullable() }).passthrough().nullable(),
   }).passthrough(),
 }).passthrough();
