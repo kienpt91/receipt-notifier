@@ -60,6 +60,9 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
       // human; the raw event is kept in webhook_events for replay.
       req.log.error({ alert: true, deliveryId, reason: mapped.reason }, 'ALERT whop payment cannot produce a receipt');
     }
+    if (result === 'conflict') {
+      req.log.error({ alert: true, deliveryId }, 'ALERT whop payment re-sent with a different receipt; first one kept');
+    }
     await redis.set(seenKey, '1', 'EX', SEEN_TTL_SECONDS).catch(() => {});
     return reply.code(200).send({ status: result });
   });
@@ -79,6 +82,9 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
     const status = await withTransaction(pool, (c) =>
       recordPaymentAndEnqueueReceipt(c, { provider: 'manual', receipt: parsed.data, status: 'paid', paidAt: new Date() }),
     );
+    if (status === 'conflict') {
+      return reply.code(409).send({ errors: { paymentReference: ['This reference was already used for a different receipt'] } });
+    }
     return reply.code(status === 'queued' ? 202 : 200).send({ status });
   });
 
