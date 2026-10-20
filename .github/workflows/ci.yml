@@ -1,0 +1,38 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+      # Same Postgres/Redis/Kafka as local dev: tests run against the real things.
+      - name: Start infrastructure
+        run: docker compose up -d
+      - name: Wait for Postgres and Kafka
+        run: |
+          for i in $(seq 1 60); do docker compose exec -T postgres pg_isready -U postgres && break; sleep 2; done
+          for i in $(seq 1 60); do
+            docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+            sleep 2
+          done
+      - run: npm test
+      - name: Infrastructure logs on failure
+        if: failure()
+        run: docker compose logs --tail 100
