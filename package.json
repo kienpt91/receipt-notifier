@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "migrate": "tsx src/scripts/migrate.ts",
-    "api": "tsx src/api/server.ts",
+    "build:web": "esbuild src/web/form.ts --bundle --format=esm --outfile=public/form.js",
+    "api": "npm run build:web && tsx src/api/server.ts",
     "relay": "tsx src/relay/relay.ts",
     "consumer": "tsx src/notification/consumer.ts",
     "worker": "tsx src/notification/worker.ts",

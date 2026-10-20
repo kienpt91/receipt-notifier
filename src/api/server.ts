@@ -1,4 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import { Redis } from 'ioredis';
 import type pg from 'pg';
@@ -19,6 +21,8 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
 
   // Keep JSON bodies as raw strings: the webhook signature covers the exact bytes.
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+
+  app.register(fastifyStatic, { root: fileURLToPath(new URL('../../public/', import.meta.url)) });
 
   app.post('/webhooks/whop', async (req, reply) => {
     const headers = req.headers as Record<string, string>;
