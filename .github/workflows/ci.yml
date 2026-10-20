@@ -25,12 +25,17 @@ jobs:
       # Same Postgres/Redis/Kafka as local dev: tests run against the real things.
       - name: Start infrastructure
         run: docker compose up -d
-      # Each probe is time-boxed: kafka-topics.sh retries forever while the broker boots.
+      # Kafka is probed from the host, the way the tests connect. An in-container probe
+      # follows the advertised listener (localhost:59092), which only exists on the host.
       - name: Wait for Postgres and Kafka
         timeout-minutes: 3
         run: |
           until timeout 10 docker compose exec -T postgres pg_isready -U postgres; do sleep 2; done
-          until timeout 15 docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1; do
+          until timeout 20 node -e "
+            const { Kafka, logLevel } = require('kafkajs');
+            const admin = new Kafka({ brokers: ['localhost:59092'], logLevel: logLevel.NOTHING, retry: { retries: 0 } }).admin();
+            admin.connect().then(() => admin.listTopics()).then(() => process.exit(0), () => process.exit(1));
+          "; do
             echo "waiting for kafka"; sleep 2
           done
       - run: npm test
