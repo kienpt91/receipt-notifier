@@ -57,6 +57,15 @@ describe('POST /webhooks/whop', () => {
     expect(await count('payments')).toBe(0);
   });
 
+  it('stores the webhook without the customer email', async () => {
+    const body = whopPaymentSucceeded({ email: 'private@example.com' });
+    await app.inject({ method: 'POST', url: '/webhooks/whop', headers: signWhop(body, 'msg_pii'), payload: body });
+    const { rows } = await pool.query('SELECT payload FROM webhook_events');
+    expect(rows).toHaveLength(1);
+    expect(JSON.stringify(rows[0].payload)).not.toContain('private@example.com');
+    expect(rows[0].payload.data.id).toBe('pay_abc123');
+  });
+
   it('ACKs but does not queue a payment that cannot produce a valid receipt', async () => {
     const body = whopPaymentSucceeded({ email: null });
     const res = await app.inject({ method: 'POST', url: '/webhooks/whop', headers: signWhop(body, 'msg_1'), payload: body });
