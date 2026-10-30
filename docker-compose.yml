@@ -1,3 +1,6 @@
+# DEVELOPMENT / TEST ONLY. Do not deploy this file.
+# Credentials are throwaway and the services have no auth or TLS; ports are published on
+# 127.0.0.1 only, so nothing here is reachable from other machines.
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,15 +8,15 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: receipts
-    ports: ["55432:5432"]
+    ports: ["127.0.0.1:55432:5432"]
 
   redis:
     image: redis:7-alpine
-    ports: ["56379:6379"]
+    ports: ["127.0.0.1:56379:6379"]
 
   kafka:
     image: apache/kafka:3.8.0
-    ports: ["59092:9092"]
+    ports: ["127.0.0.1:59092:9092"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller

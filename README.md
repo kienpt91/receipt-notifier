@@ -10,7 +10,7 @@ Requires Node 22+ and Docker.
 
 ```bash
 npm ci
-docker compose up -d        # Postgres :55432, Redis :56379, Kafka :59092
+docker compose up -d        # dev/test only: Postgres :55432, Redis :56379, Kafka :59092 (127.0.0.1)
 npm run migrate
 npm test                    # runs against the real services
 ```
@@ -29,6 +29,10 @@ npm run reconciler
 
 A receipt parked as `dead` (alerted) is requeued, once someone has checked the provider,
 with `npm run requeue -- <provider> <payment_reference>`.
+
+`docker-compose.yml` is for local development and CI only (throwaway credentials, no auth,
+ports bound to loopback). Production needs its own managed Postgres, Redis and Kafka with
+real credentials, passed in through `DATABASE_URL`, `REDIS_URL` and `KAFKA_BROKERS`.
 
 ## Configuration
 
