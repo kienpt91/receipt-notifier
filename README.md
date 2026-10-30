@@ -15,7 +15,7 @@ Redis. The design walkthrough is in [DESIGN.md](DESIGN.md).
 Requires Node 22+ and Docker.
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 docker compose up -d        # dev/test only: Postgres :55432, Redis :56379, Kafka :59092 (127.0.0.1)
 npm run migrate
 npm test                    # runs against the real services

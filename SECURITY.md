@@ -24,25 +24,27 @@ within a few days.
 
 ## Dependency policy
 
-Dependencies are pinned to exact versions, and only versions published at least 30 days
+Dependencies are pinned to exact versions, and only versions published at least 7 days
 before the lockfile was last updated are used (cutoff for the current lockfile:
-2026-09-30). Security fixes released after the cutoff are therefore not yet taken; they are
-listed below until the cutoff moves.
+2026-10-23). Security fixes released inside the 7-day window are therefore not yet taken;
+they are listed below until the cutoff moves.
+
+Installs, tests, typechecks and builds are run in a throwaway container, and packages are
+installed with `--ignore-scripts` (`npm ci --ignore-scripts` in CI and the Dockerfile), so
+dependency install scripts never run. No dependency needs one: `esbuild` falls back to its
+bundled platform binary package and `fsevents` is optional and macOS-only.
 
 ## Known open advisories
 
-`npm audit` at the current lockfile (fixes exist only in versions newer than the cutoff):
+`npm audit` (full and `--omit=dev`) at the current lockfile reports **0 vulnerabilities**.
+The previously listed advisories (`zod`, `fastify`, `fast-uri`, `ip-address`, the
+`vitest`/`vite`/`postcss`/`source-map-js` chain) are fixed by the current versions (`zod` 4.6.7, `fastify` 5.12.7, `fast-uri`
+3.1.9/4.2.3, `ip-address` 10.7.4, `vitest` 5.0.5, `vite` 8.3.5).
+Anything published after the cutoff is not yet covered by this check.
 
-| Package | Installed | Advisory | Fixed in | Scope | Reachability here |
-|---|---|---|---|---|---|
-| `zod` (direct) | 4.6.5 | memory exhaustion validating oversized constrained collections (high) | 4.6.7 | runtime | Low. Receipt schemas only validate fixed-shape objects and bounded strings (email ≤254, reference ≤64, amount ≤18 digits); no user-controlled arrays/sets/records. |
-| `fastify` (direct) | 5.12.5 | header validation bypass via case-sensitive `propertyNames` (low) | 5.12.7 | runtime | None known. No route defines a JSON-schema header validation. |
-| `fast-uri` (via fastify/ajv) | 3.1.8, 4.2.1 | URI parsing/normalisation issues (moderate) | 3.1.9 / 4.2.3 | runtime | None known. Used by fastify's schema compiler on developer-supplied schemas, never on request data. |
-| `ip-address` (via `@fastify/rate-limit`) | 10.7.2 | quadratic-time IPv6 zone parsing (moderate) | 10.7.4+ | runtime | Low. The client IP comes from the TCP socket (`trustProxy` is off), not from a user-supplied header. If you enable `trustProxy`, treat as exposed. |
-| `vitest`, `@vitest/mocker`, `vite`, `source-map-js`, `postcss` chain | 5.0.2 / 8.3.1 / 1.2.1 | various (up to high) | 5.0.5 / 8.3.5 / 1.2.2 | **dev only** | None in production: not installed in the image (`npm ci --omit=dev`). Affects developers running the vite dev server or tests; vitest's code-injection issue needs an attacker-controlled mock registration. |
-
-`@fastify/static` is at 10.1.5. A later release (10.1.8, published 2026-10-27, after the
-cutoff) is reported to fix a route-guard bypass via non-canonical paths. It is not taken yet.
+One advisory is still open because its fix is inside the cooldown window: `@fastify/static`
+is at 10.1.7; 10.1.8 (published 2026-10-27, after the cutoff) is reported to fix a
+route-guard bypass via non-canonical paths, and `npm audit` does not list it yet.
 Reachability: the static handler only serves `public/index.html` and `public/form.js`,
 which are public by design, and no authorization guard is attached to static routes. The
 authenticated route `/admin/receipts` is a regular Fastify route, not served by the static
