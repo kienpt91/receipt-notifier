@@ -15,10 +15,12 @@ npm run migrate
 npm test                    # runs against the real services
 ```
 
-Start every process, each in its own terminal; run as many workers as you like:
+Start every process, each in its own terminal; run as many workers as you like. Outside
+tests the processes need `NODE_ENV=development` (see [Configuration](#configuration)):
 
 ```bash
-npm run api          # http://localhost:3100 (admin form at /)
+export NODE_ENV=development
+npm run api          # http://127.0.0.1:3100 (admin form at /)
 npm run relay
 npm run consumer
 npm run worker
@@ -35,8 +37,11 @@ with `npm run requeue -- <provider> <payment_reference>`.
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:55432/receipts` |
 | `REDIS_URL` | `redis://localhost:56379` |
 | `KAFKA_BROKERS` | `localhost:59092` |
-| `WHOP_WEBHOOK_SECRET` | dev value. In production, use the `ws_…` secret from the Whop dashboard, verbatim |
-| `ADMIN_TOKEN` | dev value |
+| `NODE_ENV` | unset. Dev defaults for the two secrets below apply **only** when this is `development` or `test`; any other value (or unset) requires real secrets and the API refuses to start without them |
+| `WHOP_WEBHOOK_SECRET` | required unless `NODE_ENV` is `development`/`test`. Use the `ws_…` secret from the Whop dashboard, verbatim |
+| `ADMIN_TOKEN` | required unless `NODE_ENV` is `development`/`test`; at least 24 characters (e.g. `openssl rand -hex 32`) |
+| `HOST` | `127.0.0.1` (loopback only). Set `0.0.0.0` to expose the API, e.g. in a container (the Docker image does this) |
+| `PORT` | `3100` |
 | `LEASE_SECONDS` | `60` |
 
 ## CI/CD

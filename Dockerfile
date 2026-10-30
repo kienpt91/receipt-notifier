@@ -11,6 +11,8 @@ RUN npx esbuild src/web/form.ts --bundle --format=esm --outfile=public/form.js
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Inside a container the API must listen on all interfaces; publish the port deliberately.
+ENV HOST=0.0.0.0
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY migrations ./migrations

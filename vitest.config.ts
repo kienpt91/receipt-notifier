@@ -7,6 +7,7 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 60_000,
     env: {
+      NODE_ENV: 'test',
       DATABASE_URL: 'postgres://postgres:postgres@localhost:55432/receipts_test',
       REDIS_URL: 'redis://localhost:56379/1',
       LOG_LEVEL: 'warn',

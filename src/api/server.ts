@@ -106,5 +106,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // Fail fast when Redis is down instead of queueing commands: it's only a fast path.
   const redis = new Redis(config.redisUrl, { enableOfflineQueue: false, maxRetriesPerRequest: 1 });
   const app = buildServer({ pool: createPool(), redis });
-  await app.listen({ port: config.port, host: '0.0.0.0' });
+  await app.listen({ port: config.port, host: config.host });
 }

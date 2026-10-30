@@ -1,11 +1,22 @@
-const isProduction = process.env.NODE_ENV === 'production';
+/** Public dev defaults (they're in this repo) are only allowed in these two environments. */
+const allowDevDefaults = () => process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
-/** Dev defaults are public (they're in this repo), so production must set the real value. */
-function secret(name: string, devDefault: string): string {
+export const MIN_ADMIN_TOKEN_LENGTH = 24;
+
+/**
+ * Secrets have no default unless NODE_ENV is explicitly 'development' or 'test'.
+ * An unset or unknown NODE_ENV is treated like production: fail fast.
+ */
+export function secret(name: string, devDefault: string, minLength = 1): string {
   const value = process.env[name];
-  if (value) return value;
-  if (isProduction) throw new Error(`${name} must be set in production`);
-  return devDefault;
+  if (!value) {
+    if (allowDevDefaults()) return devDefault;
+    throw new Error(`${name} must be set (dev defaults only apply when NODE_ENV is 'development' or 'test')`);
+  }
+  if (!allowDevDefaults() && value.length < minLength) {
+    throw new Error(`${name} must be at least ${minLength} characters outside development/test`);
+  }
+  return value;
 }
 
 export const config = {
@@ -18,8 +29,10 @@ export const config = {
     return secret('WHOP_WEBHOOK_SECRET', 'ws_local_dev_secret');
   },
   get adminToken() {
-    return secret('ADMIN_TOKEN', 'local-admin-token');
+    return secret('ADMIN_TOKEN', 'local-admin-token', MIN_ADMIN_TOKEN_LENGTH);
   },
+  // Loopback by default; set HOST=0.0.0.0 (e.g. in a container) to expose the API.
+  host: process.env.HOST ?? '127.0.0.1',
   port: Number(process.env.PORT ?? 3100),
   leaseSeconds: Number(process.env.LEASE_SECONDS ?? 60),
   // How long the email provider dedupes on an idempotency key (Resend/Postmark: ~24h).
