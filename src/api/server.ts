@@ -1,23 +1,70 @@
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
-import Fastify from 'fastify';
+import Fastify, { type FastifyServerOptions } from 'fastify';
 import { Redis } from 'ioredis';
 import type pg from 'pg';
 import { config } from '../config.js';
 import { createPool, withTransaction } from '../db.js';
 import { ReceiptRequest, fieldErrors } from '../shared/receiptSchema.js';
 import { recordPaymentAndEnqueueReceipt } from './recordPayment.js';
-import { toReceipt, verifyWhopWebhook } from './whop.js';
+import { redactWhopEvent, toReceipt, verifyWhopWebhook } from './whop.js';
 
 // Whop retries for ~3 days with the same webhook-id; remember ids for that long.
 const SEEN_TTL_SECONDS = 3 * 24 * 60 * 60;
 
-export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: string; adminToken?: string }) {
+export interface AdminRateLimit {
+  max: number;
+  timeWindow: string | number;
+}
+
+// Per client IP, in memory (per API instance). Enough to make guessing ADMIN_TOKEN impractical.
+const DEFAULT_ADMIN_RATE_LIMIT: AdminRateLimit = { max: 30, timeWindow: '1 minute' };
+
+export function buildServer(deps: {
+  pool: pg.Pool;
+  redis: Redis;
+  whopSecret?: string;
+  adminToken?: string;
+  adminRateLimit?: AdminRateLimit;
+  /** Override for tests (e.g. to capture log lines). */
+  logger?: FastifyServerOptions['logger'];
+}) {
   const { pool, redis } = deps;
   const whopSecret = deps.whopSecret ?? config.whopWebhookSecret;
   const adminToken = deps.adminToken ?? config.adminToken;
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+  const app = Fastify({ logger: deps.logger ?? { level: process.env.LOG_LEVEL ?? 'info' } });
+
+  // Never leak internals (SQL errors, stack traces, paths) to clients: log the detail here,
+  // answer with a generic body. 4xx (bad JSON, body too large, rate limited) keep their status.
+  app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
+    if (status === 500) {
+      req.log.error({ err }, 'unhandled error');
+      return reply.code(500).send({ error: 'internal server error' });
+    }
+    return reply.code(status).send({ error: err.message });
+  });
+
+  // Security headers on every response, including the static form and /admin/*.
+  app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"], // public/index.html has an inline <style>
+        connectSrc: ["'self'"],
+        imgSrc: ["'self'"],
+        formAction: ["'self'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    frameguard: { action: 'deny' },
+    referrerPolicy: { policy: 'no-referrer' },
+  });
 
   // Keep JSON bodies as raw strings: the webhook signature covers the exact bytes.
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => done(null, body));
@@ -47,7 +94,7 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
       const inserted = await c.query(
         `INSERT INTO webhook_events (provider, event_id, event_type, payload)
          VALUES ('whop', $1, $2, $3) ON CONFLICT DO NOTHING`,
-        [deliveryId, event.type, event.raw],
+        [deliveryId, event.type, redactWhopEvent(event.raw)],
       );
       if (!inserted.rowCount) return 'duplicate' as const;
       if (!mapped.ok) return 'rejected' as const;
@@ -61,7 +108,7 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
 
     if (result === 'rejected' && !mapped.ok) {
       // A permanent data problem. Retrying the webhook won't fix it, so ACK it, but page a
-      // human; the raw event is kept in webhook_events for replay.
+      // human; a redacted copy (no customer email) is kept in webhook_events for diagnosis.
       req.log.error({ alert: true, deliveryId, reason: mapped.reason }, 'ALERT whop payment cannot produce a receipt');
     }
     if (result === 'conflict') {
@@ -72,24 +119,32 @@ export function buildServer(deps: { pool: pg.Pool; redis: Redis; whopSecret?: st
   });
 
   // Admin "manual payment" form (e.g. bank transfer). Same schema, same enqueue path.
-  app.post('/admin/receipts', async (req, reply) => {
-    if (!isAdmin(req.headers.authorization, adminToken)) return reply.code(401).send({ error: 'unauthorized' });
-    let body: unknown;
-    try {
-      body = JSON.parse(String(req.body ?? ''));
-    } catch {
-      return reply.code(400).send({ errors: { _form: ['Body must be JSON'] } });
-    }
-    const parsed = ReceiptRequest.safeParse(body);
-    if (!parsed.success) return reply.code(400).send({ errors: fieldErrors(parsed.error) });
+  // Rate limit is scoped to this plugin, so it only covers /admin/*.
+  app.register(async (admin) => {
+    await admin.register(fastifyRateLimit, { global: true, ...(deps.adminRateLimit ?? DEFAULT_ADMIN_RATE_LIMIT) });
+    admin.post('/admin/receipts', async (req, reply) => {
+      if (!isAdmin(req.headers.authorization, adminToken)) {
+        // Log who and where, never the presented token.
+        req.log.warn({ ip: req.ip, url: req.url }, 'admin auth failed');
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(String(req.body ?? ''));
+      } catch {
+        return reply.code(400).send({ errors: { _form: ['Body must be JSON'] } });
+      }
+      const parsed = ReceiptRequest.safeParse(body);
+      if (!parsed.success) return reply.code(400).send({ errors: fieldErrors(parsed.error) });
 
-    const status = await withTransaction(pool, (c) =>
-      recordPaymentAndEnqueueReceipt(c, { provider: 'manual', receipt: parsed.data, status: 'paid', paidAt: new Date() }),
-    );
-    if (status === 'conflict') {
-      return reply.code(409).send({ errors: { paymentReference: ['This reference was already used for a different receipt'] } });
-    }
-    return reply.code(status === 'queued' ? 202 : 200).send({ status });
+      const status = await withTransaction(pool, (c) =>
+        recordPaymentAndEnqueueReceipt(c, { provider: 'manual', receipt: parsed.data, status: 'paid', paidAt: new Date() }),
+      );
+      if (status === 'conflict') {
+        return reply.code(409).send({ errors: { paymentReference: ['This reference was already used for a different receipt'] } });
+      }
+      return reply.code(status === 'queued' ? 202 : 200).send({ status });
+    });
   });
 
   app.get('/healthz', async () => ({ ok: true }));

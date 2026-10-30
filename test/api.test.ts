@@ -61,7 +61,7 @@ describe('POST /webhooks/whop', () => {
     const body = whopPaymentSucceeded({ email: null });
     const res = await app.inject({ method: 'POST', url: '/webhooks/whop', headers: signWhop(body, 'msg_1'), payload: body });
     expect(res.json()).toEqual({ status: 'rejected' });
-    expect(await count('webhook_events')).toBe(1); // kept for replay after the fix
+    expect(await count('webhook_events')).toBe(1); // kept (redacted) for diagnosis
     expect(await count('outbox')).toBe(0);
   });
 });

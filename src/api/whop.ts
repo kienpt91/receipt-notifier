@@ -64,3 +64,24 @@ export function toReceipt(event: unknown): WhopReceipt {
     paidAt: data.paid_at ? new Date(data.paid_at) : null,
   };
 }
+
+/**
+ * What we keep in webhook_events: enough to correlate a webhook with a payment and to see
+ * why it was rejected (amount, currency, status, dates), without the customer's email or
+ * any other personal data in Whop's payload. Anything not listed here is dropped.
+ */
+export function redactWhopEvent(event: unknown): Record<string, unknown> {
+  const pick = (o: unknown, keys: string[]) => {
+    const src = (o && typeof o === 'object' ? o : {}) as Record<string, unknown>;
+    return Object.fromEntries(keys.filter((k) => k in src).map((k) => [k, src[k]]));
+  };
+  const e = (event && typeof event === 'object' ? event : {}) as Record<string, unknown>;
+  const data = (e.data && typeof e.data === 'object' ? e.data : {}) as Record<string, unknown>;
+  return {
+    ...pick(e, ['id', 'type', 'api_version', 'timestamp', 'account_id']),
+    data: {
+      ...pick(data, ['id', 'total', 'currency', 'status', 'paid_at']),
+      ...(data.user && typeof data.user === 'object' ? { user: pick(data.user, ['id']) } : {}),
+    },
+  };
+}
