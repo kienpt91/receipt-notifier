@@ -159,9 +159,14 @@ re-validated at the boundaries.
 - **Owned tables.** `payments` and `email_deliveries` share one database here. In
   production the notification service owns its own, and the reconciler asks it through an
   API instead of a join.
-- **Real email provider.** `FakeEmailProvider` stands in for one. A real adapter (e.g.
+- **Real email provider.** `FakeEmailProvider` stands in for one (it only writes to a Redis
+  list and refuses to start under `NODE_ENV=production`). A real adapter (e.g.
   Resend with an `Idempotency-Key` header) only needs to implement `EmailProvider` and map
   4xx responses to `PermanentEmailError`.
+- **No webhook replay.** A payment event that cannot produce a receipt (e.g. no customer
+  email) is ACKed, alerted on, and kept in `webhook_events` in redacted form (no email).
+  There is no replay tool: once the cause is fixed, record the payment through the admin
+  form, which uses the same enqueue path.
 - **Which Whop amount to bill.** `total` excludes buyer fees, so confirm with product
   which amount the receipt should show.
 - **Kafka client.** kafkajs is unmaintained. Swap it for `@confluentinc/kafka-javascript`

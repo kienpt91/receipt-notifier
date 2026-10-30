@@ -31,7 +31,15 @@ export class FakeEmailProvider implements EmailProvider {
   failNext = 0;
   failPermanently = false;
 
-  constructor(private redis: Redis) {}
+  constructor(private redis: Redis) {
+    // It "delivers" by pushing to a Redis list; no customer would ever get an email.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'FakeEmailProvider refuses to run with NODE_ENV=production: it does not send real email. ' +
+          'Implement EmailProvider for a real service and use it in src/notification/worker.ts.',
+      );
+    }
+  }
 
   async send(message: EmailMessage, { idempotencyKey }: SendOptions) {
     await this.redis.incr(`fakemail:calls:${idempotencyKey}`);

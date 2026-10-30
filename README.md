@@ -4,6 +4,12 @@ Sends exactly one receipt email per successful payment. It is built to survive c
 duplicate webhooks and concurrent workers, using Node.js/TypeScript, Postgres, Kafka and
 Redis. The design walkthrough is in [DESIGN.md](DESIGN.md).
 
+> **Email delivery is simulated.** The worker uses `FakeEmailProvider`, which only records
+> the "sent" message in a Redis list (`fakemail:inbox`); no real email leaves this system.
+> This is a reference implementation until a real `EmailProvider` (Resend, Postmark, ...) is
+> wired into `src/notification/worker.ts`. To stop it being deployed by mistake,
+> `FakeEmailProvider` refuses to start when `NODE_ENV=production`.
+
 ## Run locally
 
 Requires Node 22+ and Docker.
