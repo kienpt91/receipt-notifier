@@ -40,6 +40,29 @@ with `npm run requeue -- <provider> <payment_reference>`.
 ports bound to loopback). Production needs its own managed Postgres, Redis and Kafka with
 real credentials, passed in through `DATABASE_URL`, `REDIS_URL` and `KAFKA_BROKERS`.
 
+## Admin endpoint
+
+`POST /admin/receipts` needs `Authorization: Bearer <ADMIN_TOKEN>`. It is rate limited per
+client IP (30 requests/minute, in memory per API instance), failed attempts are logged
+(client IP and URL, never the token), and every response carries CSP, `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Put the API behind TLS;
+the token travels in a header. Unexpected errors return a generic `500` body, details go to
+the server log only.
+
+## Data retention
+
+`webhook_events` keeps a *redacted* copy of each Whop webhook (ids, amount, currency,
+status, dates; no customer email or other personal data). `payments` and `email_deliveries`
+still hold the customer's email, as the receipt needs it. `dead_letters.value` holds the raw
+Kafka message, which includes the email.
+
+Run `npm run purge` periodically (cron, scheduled job) to delete:
+
+- `webhook_events` older than `WEBHOOK_EVENT_RETENTION_DAYS` (default `30`)
+- `dead_letters` that were marked resolved more than `DEAD_LETTER_RETENTION_DAYS` ago
+  (default `30`). Mark one resolved with
+  `UPDATE dead_letters SET resolved_at = now() WHERE id = <id>`. Unresolved ones are never purged.
+
 ## Configuration
 
 | Env | Default |
@@ -53,6 +76,8 @@ real credentials, passed in through `DATABASE_URL`, `REDIS_URL` and `KAFKA_BROKE
 | `HOST` | `127.0.0.1` (loopback only). Set `0.0.0.0` to expose the API, e.g. in a container (the Docker image does this) |
 | `PORT` | `3100` |
 | `LEASE_SECONDS` | `60` |
+| `WEBHOOK_EVENT_RETENTION_DAYS` | `30` (used by `npm run purge`) |
+| `DEAD_LETTER_RETENTION_DAYS` | `30` (used by `npm run purge`) |
 
 ## CI/CD
 

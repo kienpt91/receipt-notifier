@@ -11,6 +11,7 @@
     "consumer": "tsx src/notification/consumer.ts",
     "worker": "tsx src/notification/worker.ts",
     "requeue": "tsx src/notification/requeue.ts",
+    "purge": "tsx src/scripts/purge.ts",
     "reconciler": "tsx src/notification/reconciler.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
