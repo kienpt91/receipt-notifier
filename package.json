@@ -33,7 +33,7 @@
     "@types/node": "22.20.4",
     "@types/pg": "8.23.1",
     "esbuild": "0.28.2",
-    "standardwebhooks": "1.1.0",
+    "standardwebhooks": "1.1.1",
     "typescript": "5.9.3",
     "vitest": "5.0.2"
   }
