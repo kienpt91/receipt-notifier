@@ -84,3 +84,14 @@ Run `npm run purge` periodically (cron, scheduled job) to delete:
 GitHub Actions runs on every pull request: typecheck, then the full test suite against
 Postgres, Redis and Kafka started with the same `docker-compose.yml`. Each push to `main`
 also builds the image and publishes it to `ghcr.io/<owner>/receipt-notifier`.
+
+## Secrets and hooks
+
+- Never commit `.env` files or credentials. Copy `.env.example` to `.env` for local settings; `.env` is gitignored.
+- Install [lefthook](https://github.com/evilmartians/lefthook) and run `lefthook install` once per clone. This enables two hooks from `lefthook.yml`:
+  - `pre-commit` runs `sh scripts/secret-scan.sh --staged` and blocks a commit that stages a secret.
+  - `pre-push` runs `sh scripts/secret-scan.sh --tree` and blocks a push if the working tree contains one.
+- The scanner (`scripts/secret-scan.sh`) has no dependencies. It flags secret-shaped values and forbidden file names, and prints the file, line and rule but never the value. CI also scans the tree and the full history.
+- A reviewed false positive can be listed in `.secret-scan-allow`, one line per file and rule: `<path> <rule>  # reason`. A single line can be allowed with the inline marker `secret-scan: allow`. Keep entries specific and never allow a real credential.
+- If a secret is ever committed, rotate it first (assume it is compromised), then remove it from history.
+
