@@ -83,7 +83,7 @@ Run `npm run purge` periodically (cron, scheduled job) to delete:
 
 GitHub Actions runs on every pull request: typecheck, then the full test suite against
 Postgres, Redis and Kafka started with the same `docker-compose.yml`. Each push to `main`
-also builds the image and publishes it to `ghcr.io/<owner>/receipt-notifier`.
+also builds the image and publishes it to `ghcr.io/<owner>/receipt-notifier`. Pushing a `v*` tag runs a separate release workflow that creates a GitHub release with a checksummed, attested source archive (see [RELEASING.md](RELEASING.md)).
 
 ## Secrets and hooks
 
@@ -95,3 +95,6 @@ also builds the image and publishes it to `ghcr.io/<owner>/receipt-notifier`.
 - A reviewed false positive can be listed in `.secret-scan-allow`, one line per file and rule: `<path> <rule>  # reason`. A single line can be allowed with the inline marker `secret-scan: allow`. Keep entries specific and never allow a real credential.
 - If a secret is ever committed, rotate it first (assume it is compromised), then remove it from history.
 
+## Releasing
+
+Releases are cut by pushing a `vMAJOR.MINOR.PATCH` tag. The `release` workflow then verifies the code, builds the files, writes `SHA256SUMS`, attests where they were built and creates the GitHub release. See [RELEASING.md](RELEASING.md) for how to cut a release and how to verify a download with `gh attestation verify`.
